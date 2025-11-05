@@ -3,46 +3,34 @@ const cors = require("cors");
 const { Pool } = require("pg");
 const path = require("path");
 const fs = require("fs");
+require('dotenv').config();
+
 
 const app = express();
-
-// Use Render's port or fallback for local development
-const port = process.env.PORT || 5000;
+const port = 5000;
 
 // Middleware
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// PostgreSQL Connection - Use environment variables for production
+// PostgreSQL Connection - Single Database Connection
 const pgPool = new Pool({
-  connectionString: process.env.DATABASE_URL || "postgresql://postgres:V@lidation@uj2025@localhost:5432/Post",
-  // Add SSL for production (Render PostgreSQL requires this)
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  user: process.env.DB_USER_NAME,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
+  port: process.env.DB_PORT,
+  ssl: process.env.DB_SSLMODE ? { rejectUnauthorized: false } : false, // Essential for Render
 });
 
-// Serve static files
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
 // ==================== HEALTH CHECK ENDPOINT ====================
-app.get("/health", async (req, res) => {
-  try {
-    // Test database connection
-    await pgPool.query('SELECT 1');
-    res.json({ 
-      status: 'OK', 
-      message: 'CHIETA Backend is running',
-      timestamp: new Date().toISOString(),
-      version: '1.0.0',
-      environment: process.env.NODE_ENV || 'development',
-      database: 'connected'
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      status: 'ERROR', 
-      message: 'Database connection failed',
-      error: error.message 
-    });
-  }
+app.get("/health", (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'CHIETA Backend is running',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
+  });
 });
 
 // ==================== SSDD ENDPOINTS (Student/SSDD Screen) ====================
@@ -52,7 +40,7 @@ app.get("/students/:email", async (req, res) => {
   const { email } = req.params;
   try {
     const result = await pgPool.query(
-      "SELECT * FROM public.ssdd_complete_student_decision_outcome WHERE email = $1", 
+      "SELECT * FROM mobile_app_student_decision_outcome WHERE email = $1", 
       [email]
     );
     res.json(result.rows);
@@ -67,7 +55,7 @@ app.get("/student-status/:email", async (req, res) => {
   const { email } = req.params;
   try {
     const result = await pgPool.query(
-      "SELECT * FROM public.ssdd_complete_company_decision_outcome WHERE email = $1", 
+      "SELECT * FROM mobile_app_company_decision_outcome WHERE email = $1", 
       [email]
     );
     res.json(result.rows);
@@ -78,25 +66,22 @@ app.get("/student-status/:email", async (req, res) => {
 });
 
 // Fetch documents based on email
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
 app.get("/documents/:email", async (req, res) => {
   const { email } = req.params;
   try {
     const result = await pgPool.query(
-      "SELECT * FROM public.ssdd_complete_uploaded_documents WHERE email = $1", 
+      "SELECT * FROM mobile_app_uploaded_documents WHERE email = $1", 
       [email]
     );
-    
-    // Use dynamic base URL for file URLs
-    const baseUrl = process.env.NODE_ENV === 'production' 
-      ? `https://${req.get('host')}`
-      : `http://localhost:${port}`;
     
     const documentsWithUrls = result.rows.map((doc) => {
       const filePath = path.join(__dirname, "uploads", doc.file_name);
       const fileExists = fs.existsSync(filePath);
       return {
         ...doc,
-        file_url: fileExists ? `${baseUrl}/uploads/${doc.file_name}` : null,
+        file_url: fileExists ? `http://localhost:${port}/uploads/${doc.file_name}` : null,
       };
     });
 
@@ -118,6 +103,7 @@ app.post("/login", async (req, res) => {
   }
 
   try {
+    // Query to check all user types in one go
     const query = `
       SELECT 
         email, 
@@ -125,7 +111,7 @@ app.post("/login", async (req, res) => {
         is_active, 
         is_placed,
         password
-      FROM public.ssdd_complete_login
+      FROM mobile_app_login
       WHERE email = $1 AND password = $2
         AND accountstatus = TRUE
       LIMIT 1
@@ -140,12 +126,14 @@ app.post("/login", async (req, res) => {
     const user = rows[0];
     let additionalData = {};
 
+    // Get additional data based on account type
     if (user.accounttype === 'Company') {
+      // Get organization details for Company users
       const orgQuery = `
         SELECT 
           organisation_name,
           contact_person_name
-        FROM dg_master 
+        FROM mobile_app_dg_master 
         WHERE organisation_email = $1 OR contact_person_email = $1
         LIMIT 1
       `;
@@ -153,6 +141,7 @@ app.post("/login", async (req, res) => {
       additionalData = orgResult.rows[0] || {};
     }
 
+    // Prepare response based on account type
     const response = {
       message: "Login successful",
       user: {
@@ -189,7 +178,7 @@ app.get("/summary-stats/:email", async (req, res) => {
           ELSE 0
         END AS avgPerLearner,
         COUNT(*) AS totalContracts
-      FROM dg_master
+      FROM mobile_app_dg_master
       WHERE organisation_email = $1 OR contact_person_email = $1
     `, [email]);
     
@@ -211,7 +200,7 @@ app.get("/program-breakdown/:email", async (req, res) => {
         COUNT(*) AS count,
         COALESCE(SUM(amount_per_moa_gb_approvals), 0) AS totalAmount,
         COALESCE(SUM(number_of_learners_funded_per_moa), 0) AS learners
-      FROM dg_master
+      FROM mobile_app_dg_master
       WHERE organisation_email = $1 OR contact_person_email = $1
       GROUP BY programmes_afs
       ORDER BY totalAmount DESC
@@ -247,7 +236,7 @@ app.get("/contract-details/:email", async (req, res) => {
         dg_year,
         cycle,
         status
-      FROM dg_master
+      FROM mobile_app_dg_master
       WHERE organisation_email = $1 OR contact_person_email = $1
       ORDER BY contract_start_date DESC
     `, [email]);
@@ -275,7 +264,7 @@ app.get("/gm-dashboard/:email", async (req, res) => {
           ELSE 0
         END AS avgPerLearner,
         COUNT(*) AS totalContracts
-      FROM dg_master
+      FROM mobile_app_dg_master
       WHERE organisation_email = $1 OR contact_person_email = $1
     `, [email]);
     
@@ -286,7 +275,7 @@ app.get("/gm-dashboard/:email", async (req, res) => {
         COUNT(*) AS count,
         COALESCE(SUM(amount_per_moa_gb_approvals), 0) AS totalAmount,
         COALESCE(SUM(number_of_learners_funded_per_moa), 0) AS learners
-      FROM dg_master
+      FROM mobile_app_dg_master
       WHERE organisation_email = $1 OR contact_person_email = $1
       GROUP BY programmes_afs
       ORDER BY totalAmount DESC
@@ -298,7 +287,7 @@ app.get("/gm-dashboard/:email", async (req, res) => {
         status,
         COUNT(*) AS count,
         COALESCE(SUM(amount_per_moa_gb_approvals), 0) AS total_amount
-      FROM dg_master
+      FROM mobile_app_dg_master
       WHERE organisation_email = $1 OR contact_person_email = $1
       GROUP BY status
       ORDER BY count DESC
@@ -312,7 +301,7 @@ app.get("/gm-dashboard/:email", async (req, res) => {
         programmes_afs,
         status,
         contract_start_date
-      FROM dg_master
+      FROM mobile_app_dg_master
       WHERE organisation_email = $1 OR contact_person_email = $1
       ORDER BY contract_start_date DESC
       LIMIT 5
@@ -346,7 +335,7 @@ app.get("/organisation-profile/:email", async (req, res) => {
         COUNT(DISTINCT programmes_afs) AS total_programs,
         SUM(number_of_learners_funded_per_moa) AS total_learners_funded,
         SUM(amount_per_moa_gb_approvals) AS total_funding_received
-      FROM dg_master
+      FROM mobile_app_dg_master
       WHERE organisation_email = $1 OR contact_person_email = $1
       GROUP BY organisation_name, organisation_email, contact_person_name, contact_person_email
       LIMIT 1
@@ -378,7 +367,7 @@ app.get("/mg-status", async (req, res) => {
         description,
         status,
         time_remaining AS "timeRemaining"
-      FROM tbl_mandatory_grant_window
+      FROM mobile_app_mandatory_grant_window
       ORDER BY start_date DESC
     `);
     
@@ -401,7 +390,7 @@ app.get("/dg-status", async (req, res) => {
         description,
         status,
         time_remaining AS "timeRemaining"
-      FROM tbl_discretionary_grant_window
+      FROM mobile_app_discretionary_grant_window
       ORDER BY launch_date DESC
     `);
     
@@ -428,7 +417,7 @@ app.get("/organisation-details/:email", async (req, res) => {
         COUNT(d.contract_number) AS total_contracts,
         COALESCE(SUM(d.amount_per_moa_gb_approvals), 0) AS total_funding,
         COALESCE(SUM(d.number_of_learners_funded_per_moa), 0) AS total_learners
-      FROM public.organisation o
+      FROM mobile_app_organisation o
       LEFT JOIN dg_master d ON o.organisationname = d.organisation_name
       WHERE o.contactemail = $1 OR o.primarycontact = $1
       GROUP BY 
@@ -456,7 +445,7 @@ app.get("/documents-stats", async (req, res) => {
         filename,
         documenttype,
         module
-      FROM tbl_documents
+      FROM mobile_app_tbl_documents
     `);
     
     res.json({
@@ -478,7 +467,7 @@ app.get("/user/:email", async (req, res) => {
   try {
     const query = `
       SELECT email, accounttype, is_active, is_placed 
-      FROM public.ssdd_complete_login 
+      FROM mobile_app_login 
       WHERE email = $1 
       LIMIT 1
     `;
@@ -522,7 +511,7 @@ app.use((err, req, res, next) => {
 
 // Start Server
 app.listen(port, () => {
-  console.log(`🚀 CHIETA Backend Server is running on port ${port}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔧 Health check: http://localhost:${port}/health`);
+  console.log(`CHIETA Backend Server is running on http://localhost:${port}`);
+  console.log(`Health check: http://localhost:${port}/health`);
+  console.log(`Single login endpoint for all users`);
 });
