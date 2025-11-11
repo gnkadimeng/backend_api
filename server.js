@@ -272,7 +272,7 @@ app.get("/gm-dashboard/:email", async (req, res) => {
         END AS avgPerLearner,
         COUNT(*) AS totalContracts
       FROM mobile_app_dg_master
-      WHERE organisation_email = $1 OR contact_person_email = $1
+      WHERE email = $1 
     `, [email]);
     
     // Get program breakdown
