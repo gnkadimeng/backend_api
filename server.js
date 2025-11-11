@@ -361,6 +361,7 @@ app.get("/dg-status", async (req, res) => {
         deadlinetime AS "deadlineTime"
       FROM mobile_app_discretionary_grant_window
       ORDER BY launchdte DESC
+      LIMIT 2;
     `);
     
     res.json(result.rows);
