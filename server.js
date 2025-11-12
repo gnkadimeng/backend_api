@@ -170,6 +170,8 @@ app.post("/login", async (req, res) => {
   }
 });
 
+
+
 // ==================== GM DASHBOARD ENDPOINTS ====================
 
 // Get GM Dashboard Summary Stats by Email
@@ -191,7 +193,12 @@ app.get("/summary-stats/:email", async (req, res) => {
       WHERE email = $1 
     `, [email]);
     
-    res.json(result.rows[0]);
+    res.json(result.rows[0] || {
+      totalFunding: 0,
+      totalLearners: 0,
+      avgPerLearner: 0,
+      totalContracts: 0
+    });
   } catch (error) {
     console.error("Database error:", error);
     res.status(500).json({ error: "Failed to fetch summary stats" });
@@ -215,7 +222,7 @@ app.get("/program-breakdown/:email", async (req, res) => {
       ORDER BY totalAmount DESC
     `, [email]);
     
-    res.json(result.rows);
+    res.json(result.rows || []);
   } catch (error) {
     console.error("Database error:", error);
     res.status(500).json({ error: "Failed to fetch program breakdown" });
@@ -228,10 +235,10 @@ app.get("/contract-details/:email", async (req, res) => {
   
   try {
     const result = await pgPool.query(`
-  SELECT organisation_name   
+      SELECT 
+        organisation_name,
         contract_number,
         short_contract_number,
-        organisation_name,
         programmes_afs,
         amount_per_moa_gb_approvals,
         number_of_learners_funded_per_moa,
@@ -245,17 +252,16 @@ app.get("/contract-details/:email", async (req, res) => {
       FROM mobile_app_dg_master
       WHERE email = $1
       ORDER BY contract_start_date DESC
-
     `, [email]);
     
-    res.json(result.rows);
+    res.json(result.rows || []);
   } catch (error) {
     console.error("Database error:", error);
     res.status(500).json({ error: "Failed to fetch contract details" });
   }
 });
 
-// Get all GM Dashboard data in one endpoint by Email
+// Get all GM Dashboard data in one endpoint by Email 
 app.get("/gm-dashboard/:email", async (req, res) => {
   const { email } = req.params;
   
@@ -288,24 +294,22 @@ app.get("/gm-dashboard/:email", async (req, res) => {
       ORDER BY totalAmount DESC
     `, [email]);
     
-    // Get contracts by status
-    const contractsByStatus = await pgPool.query(`
-    SELECT 
-        COUNT(*) AS count,
-        COALESCE(SUM(amount_per_moa_gb_approvals), 0) AS total_amount
-      FROM mobile_app_dg_master
-      WHERE email = $1
-   
-      ORDER BY count DESC
-    `, [email]);
-    
     // Get recent contracts
     const recentContracts = await pgPool.query(`
       SELECT 
         contract_number,
+        short_contract_number,
         organisation_name,
         programmes_afs,
-        contract_start_date
+        amount_per_moa_gb_approvals,
+        number_of_learners_funded_per_moa,
+        contract_start_date,
+        contract_end_date,
+        funding_window_name,
+        region,
+        cost_code,
+        dg_year,
+        cycle
       FROM mobile_app_dg_master
       WHERE email = $1 
       ORDER BY contract_start_date DESC
@@ -313,10 +317,14 @@ app.get("/gm-dashboard/:email", async (req, res) => {
     `, [email]);
     
     res.json({
-      summary: summaryStats.rows[0],
-      programBreakdown: programBreakdown.rows,
-      contractsByStatus: contractsByStatus.rows,
-      recentContracts: recentContracts.rows,
+      summary: summaryStats.rows[0] || {
+        totalFunding: 0,
+        totalLearners: 0,
+        avgPerLearner: 0,
+        totalContracts: 0
+      },
+      programBreakdown: programBreakdown.rows || [],
+      recentContracts: recentContracts.rows || [],
       userEmail: email
     });
   } catch (error) {
@@ -324,7 +332,6 @@ app.get("/gm-dashboard/:email", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch GM dashboard data" });
   }
 });
-
 
 
 // ==================== IM DASHBOARD ENDPOINTS ====================
