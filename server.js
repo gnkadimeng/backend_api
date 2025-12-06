@@ -5,22 +5,24 @@ const path = require("path");
 const fs = require("fs");
 require('dotenv').config();
 
-
 const app = express();
-const port = 5000;
+const port = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// PostgreSQL Connection - Single Database Connection
+// Serve static files from uploads directory
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// PostgreSQL Connection
 const pgPool = new Pool({
   user: process.env.DB_USER_NAME,
   host: process.env.DB_HOST,
   database: process.env.DB_NAME,
   password: process.env.DB_PASSWORD,
   port: process.env.DB_PORT,
-  ssl: process.env.DB_SSLMODE ? { rejectUnauthorized: false } : false, // Essential for Render
+  ssl: process.env.DB_SSLMODE ? { rejectUnauthorized: false } : false,
 });
 
 // ==================== HEALTH CHECK ENDPOINT ====================
@@ -29,11 +31,36 @@ app.get("/health", (req, res) => {
     status: 'OK', 
     message: 'CHIETA Backend is running',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: '1.0.0',
+    endpoints: [
+      "/health",
+      "/login",
+      "/user/:email",
+      "/students/:email",
+      "/student-status/:email",
+      "/documents/:email",
+      "/download/document/:filename",
+      "/summary-stats/:email",
+      "/program-breakdown/:email",
+      "/contract-details/:email",
+      "/gm-dashboard/:email",
+      "/organisation-profile/:email",
+      "/mg-status",
+      "/dg-status",
+      "/organisation-applications/:email",
+      "/mg-applications-details/:sdlNo",
+      "/dg-applications-details/:sdlNo",
+      "/mg-application-detail/:applicationNumber",
+      "/dg-application-detail/:applicationNumber",
+      "/organisation-detail/:sdlNo",
+      "/download-document/:applicationNumber/:documentType",
+      "/documents-stats/:email",
+      "/organisation-contracts"
+    ]
   });
 });
 
-// ==================== SSDD ENDPOINTS (Student/SSDD Screen) ====================
+// ==================== SSDD ENDPOINTS ====================
 
 // Fetch student data based on email
 app.get("/students/:email", async (req, res) => {
@@ -66,8 +93,6 @@ app.get("/student-status/:email", async (req, res) => {
 });
 
 // Fetch documents based on email
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
 app.get("/documents/:email", async (req, res) => {
   const { email } = req.params;
   try {
@@ -76,12 +101,20 @@ app.get("/documents/:email", async (req, res) => {
       [email]
     );
     
+    // Get server's base URL dynamically
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    
     const documentsWithUrls = result.rows.map((doc) => {
-      const filePath = path.join(__dirname, "uploads", doc.file_name);
-      const fileExists = fs.existsSync(filePath);
+      // Generate proper download URL
+      const downloadUrl = doc.file_name ? 
+        `${baseUrl}/download/document/${encodeURIComponent(doc.file_name)}` : 
+        null;
+      
       return {
         ...doc,
-        file_url: fileExists ? `http://localhost:${port}/uploads/${doc.file_name}` : null,
+        file_url: downloadUrl,
+        file_size: doc.file_size || 'N/A',
+        uploaded_at: doc.uploaded_at || doc.upload_date || new Date().toISOString()
       };
     });
 
@@ -92,9 +125,79 @@ app.get("/documents/:email", async (req, res) => {
   }
 });
 
-// ==================== SINGLE LOGIN ENDPOINT ====================
+// Direct file download endpoint
+app.get("/download/document/:filename", async (req, res) => {
+  const { filename } = req.params;
+  
+  try {
+    // Decode filename
+    const decodedFilename = decodeURIComponent(filename);
+    
+    // Construct file path
+    const filePath = path.join(__dirname, 'uploads', decodedFilename);
+    
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      console.error(`File not found: ${filePath}`);
+      return res.status(404).json({ 
+        error: "File not found",
+        filename: decodedFilename 
+      });
+    }
+    
+    // Get file stats
+    const stat = fs.statSync(filePath);
+    
+    // Determine content type based on file extension
+    const ext = path.extname(decodedFilename).toLowerCase();
+    let contentType = 'application/octet-stream';
+    
+    switch(ext) {
+      case '.pdf':
+        contentType = 'application/pdf';
+        break;
+      case '.doc':
+      case '.docx':
+        contentType = 'application/msword';
+        break;
+      case '.xls':
+      case '.xlsx':
+        contentType = 'application/vnd.ms-excel';
+        break;
+      case '.jpg':
+      case '.jpeg':
+        contentType = 'image/jpeg';
+        break;
+      case '.png':
+        contentType = 'image/png';
+        break;
+      case '.txt':
+        contentType = 'text/plain';
+        break;
+    }
+    
+    // Set headers for file download
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${decodedFilename}"`);
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Cache-Control', 'no-cache');
+    
+    console.log(`📤 Serving file: ${decodedFilename} (${contentType}, ${stat.size} bytes)`);
+    
+    // Stream the file
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+    
+  } catch (error) {
+    console.error("Error downloading file:", error);
+    res.status(500).json({ 
+      error: "Failed to download file",
+      message: error.message 
+    });
+  }
+});
 
-// Universal Login for Students & Companies
+// ==================== SINGLE LOGIN ENDPOINT ====================
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
   
@@ -103,7 +206,6 @@ app.post("/login", async (req, res) => {
   }
 
   try {
-    // Query to check all user types in one go
     const query = `
       SELECT 
         email, 
@@ -126,9 +228,7 @@ app.post("/login", async (req, res) => {
     const user = rows[0];
     let additionalData = {};
 
-    // Get additional data based on account type
     if (user.accounttype === 'Company') {
-      // Get organization details for Company users
       const orgQuery = `
         SELECT 
           organisation_name,
@@ -141,16 +241,10 @@ app.post("/login", async (req, res) => {
       `;
       const orgResult = await pgPool.query(orgQuery, [email]);
       if (orgResult.rows.length > 0) {
-        additionalData = {
-          organisation_name: orgResult.rows[0].organisation_name,
-          contract_number: orgResult.rows[0].contract_number,
-          region: orgResult.rows[0].region,
-          programmes_afs: orgResult.rows[0].programmes_afs
-        };
+        additionalData = orgResult.rows[0];
       }
     }
 
-    // Prepare response based on account type
     const response = {
       message: "Login successful",
       user: {
@@ -169,8 +263,6 @@ app.post("/login", async (req, res) => {
     res.status(500).json({ message: "Internal server error during login" });
   }
 });
-
-
 
 // ==================== GM DASHBOARD ENDPOINTS ====================
 
@@ -333,7 +425,6 @@ app.get("/gm-dashboard/:email", async (req, res) => {
   }
 });
 
-
 // ==================== IM DASHBOARD ENDPOINTS ====================
 
 // Get Mandatory Grant Status for IM Dashboard
@@ -377,7 +468,8 @@ app.get("/dg-status", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch discretionary grant status" });
   }
 });
-// check organization applications with document status and download links
+
+// Check organization applications with document status and download links
 app.get("/organisation-applications/:email", async (req, res) => {
   const { email } = req.params;
   
@@ -439,7 +531,7 @@ app.get("/organisation-applications/:email", async (req, res) => {
   }
 });
 
-// get detailed MG applications with documents
+// Get detailed MG applications with documents
 app.get("/mg-applications-details/:sdlNo", async (req, res) => {
   const { sdlNo } = req.params;
   
@@ -484,7 +576,7 @@ app.get("/mg-applications-details/:sdlNo", async (req, res) => {
   }
 });
 
-// New endpoint to get detailed DG applications with documents
+// Get detailed DG applications with documents
 app.get("/dg-applications-details/:sdlNo", async (req, res) => {
   const { sdlNo } = req.params;
   
@@ -546,30 +638,188 @@ app.get("/dg-applications-details/:sdlNo", async (req, res) => {
   }
 });
 
-// Enhanced document download endpoint for both MG and DG
+// ==================== APPLICATION DETAIL ENDPOINTS ====================
+
+// Get MG Application Detail by Application Number
+app.get("/mg-application-detail/:applicationNumber", async (req, res) => {
+  const { applicationNumber } = req.params;
+  
+  try {
+    const result = await pgPool.query(`
+      SELECT 
+        id,
+        application_number AS "Application_Number",
+        application_title AS "Application_Title",
+        application_description AS "Application_Description",
+        submission_date AS "Submission_Date",
+        status,
+        
+        -- WSP Document details
+        wsp_file_path AS "WSP_File_Path",
+        wsp_approval_status AS "WSP_Approval_Status",
+        wsp_submission_date AS "WSP_Submission_Date",
+        
+        -- MOA Document details
+        moa_file_path AS "MOA_File_Path",
+        moa_status AS "MOA_Status",
+        moa_submission_date AS "MOA_Submission_Date",
+        
+        -- Awards Letter details
+        awards_letter_file_path AS "Awards_Letter_File_Path",
+        awards_letter_status AS "Awards_Letter_Status",
+        awards_letter_date AS "Awards_Letter_Date",
+        
+        -- Additional info
+        organisation_name AS "Organisation_Name",
+        sdl_no AS "SDL_No",
+        datecreated AS "Date_Created"
+        
+      FROM mobile_app_mg_applications 
+      WHERE application_number = $1
+      LIMIT 1
+    `, [applicationNumber]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "MG application not found" });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error fetching MG application detail:", error);
+    res.status(500).json({ error: "Failed to fetch MG application details" });
+  }
+});
+
+// Get DG Application Detail by Application Number
+app.get("/dg-application-detail/:applicationNumber", async (req, res) => {
+  const { applicationNumber } = req.params;
+  
+  try {
+    const result = await pgPool.query(`
+      SELECT 
+        id,
+        application_number AS "Application_Number",
+        application_title AS "Application_Title",
+        application_description AS "Application_Description",
+        submission_date AS "Submission_Date",
+        status,
+        
+        -- Project Details
+        project_title AS "Project_Title",
+        project_description AS "Project_Description",
+        project_start_date AS "Project_Start_Date",
+        project_end_date AS "Project_End_Date",
+        number_of_learners AS "Number_Of_Learners",
+        total_funding_amount AS "Total_Funding_Amount",
+        
+        -- Application Form
+        application_form_path AS "Application_Form_Path",
+        application_form_status AS "Application_Form_Status",
+        application_form_submission_date AS "Application_Form_Submission_Date",
+        
+        -- Proposal Document
+        proposal_document_path AS "Proposal_Document_Path",
+        proposal_status AS "Proposal_Status",
+        proposal_submission_date AS "Proposal_Submission_Date",
+        
+        -- MOA Document
+        moa_file_path AS "MOA_File_Path",
+        moa_status AS "MOA_Status",
+        moa_submission_date AS "MOA_Submission_Date",
+        
+        -- Awards Letter
+        awards_letter_file_path AS "Awards_Letter_File_Path",
+        awards_letter_status AS "Awards_Letter_Status",
+        awards_letter_date AS "Awards_Letter_Date",
+        
+        -- Contract Details
+        contract_number AS "Contract_Number",
+        contract_status AS "Contract_Status",
+        
+        -- Additional info
+        organisation_name AS "Organisation_Name",
+        sdl_no AS "SDL_No",
+        datecreated AS "Date_Created"
+        
+      FROM mobile_app_dg_applications 
+      WHERE application_number = $1
+      LIMIT 1
+    `, [applicationNumber]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "DG application not found" });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error fetching DG application detail:", error);
+    res.status(500).json({ error: "Failed to fetch DG application details" });
+  }
+});
+
+// Get Organization Detail by SDL Number
+app.get("/organisation-detail/:sdlNo", async (req, res) => {
+  const { sdlNo } = req.params;
+  
+  try {
+    const result = await pgPool.query(`
+      SELECT 
+        sdlno AS "SDL_No",
+        organisationname AS "Organisation_Name",
+        tradingname AS "Trading_Name",
+        organisationtype AS "Organisation_Type",
+        applicationstatus AS "Approval_Status",
+        email,
+        contactperson AS "Contact_Person",
+        contactnumber AS "Contact_Number",
+        province,
+        city,
+        address,
+        datecreated AS "Date_Created",
+        lastupdated AS "Last_Updated"
+      FROM mobile_app_organisation 
+      WHERE sdlno = $1
+      LIMIT 1
+    `, [sdlNo]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Organization not found" });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error fetching organization detail:", error);
+    res.status(500).json({ error: "Failed to fetch organization details" });
+  }
+});
+
+// Enhanced document download endpoint for MG and DG applications
 app.get("/download-document/:applicationNumber/:documentType", async (req, res) => {
   const { applicationNumber, documentType } = req.params;
   
   try {
     // Validate document type
     const validDocumentTypes = ['wsp', 'moa', 'awards_letter', 'application_form', 'proposal'];
-    if (!validDocumentTypes.includes(documentType)) {
+    if (!validDocumentTypes.includes(documentType.toLowerCase())) {
       return res.status(400).json({ error: "Invalid document type" });
     }
     
     // Determine which table to query based on application number prefix
-    const table = applicationNumber.startsWith('MG') ? 'mobile_app_mg_applications' : 'mobile_app_dg_applications';
-    
-    // Map document types to column names
-    const documentColumnMap = {
-      'wsp': 'wsp_file_path',
-      'moa': 'moa_file_path',
-      'awards_letter': 'awards_letter_file_path',
-      'application_form': 'application_form_path',
-      'proposal': 'proposal_document_path'
-    };
-    
-    const columnName = documentColumnMap[documentType];
+    let table, columnName;
+    if (applicationNumber.startsWith('MG')) {
+      table = 'mobile_app_mg_applications';
+      columnName = documentType.toLowerCase() === 'wsp' ? 'wsp_file_path' : 
+                   documentType.toLowerCase() === 'moa' ? 'moa_file_path' : 
+                   'awards_letter_file_path';
+    } else if (applicationNumber.startsWith('DG')) {
+      table = 'mobile_app_dg_applications';
+      columnName = documentType.toLowerCase() === 'application_form' ? 'application_form_path' : 
+                   documentType.toLowerCase() === 'proposal' ? 'proposal_document_path' : 
+                   documentType.toLowerCase() === 'moa' ? 'moa_file_path' : 
+                   'awards_letter_file_path';
+    } else {
+      return res.status(400).json({ error: "Invalid application number format" });
+    }
     
     const result = await pgPool.query(`
       SELECT 
@@ -591,6 +841,11 @@ app.get("/download-document/:applicationNumber/:documentType", async (req, res) 
       return res.status(404).json({ error: "Document not available" });
     }
     
+    // Extract filename from path
+    const filename = application.file_path.split('/').pop();
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const directDownloadUrl = `/download/document/${encodeURIComponent(filename)}`;
+    
     res.json({
       success: true,
       message: "Document download ready",
@@ -599,7 +854,9 @@ app.get("/download-document/:applicationNumber/:documentType", async (req, res) 
       applicationTitle: application.application_title,
       organisationName: application.organisation_name,
       filePath: application.file_path,
-      downloadUrl: `/api/documents/${applicationNumber}/${documentType}`
+      fileName: filename,
+      downloadUrl: directDownloadUrl,
+      directDownload: `${baseUrl}${directDownloadUrl}`
     });
     
   } catch (error) {
@@ -608,28 +865,75 @@ app.get("/download-document/:applicationNumber/:documentType", async (req, res) 
   }
 });
 
-// ==================== DOCUMENTS ENDPOINTS ====================
-
-app.get("/documents-stats/:email", async (req, res) => {
+// Alternative document download endpoint for both MG and DG (compatibility)
+app.get("/api/download-document/:applicationNumber/:documentType", async (req, res) => {
+  const { applicationNumber, documentType } = req.params;
+  
   try {
+    // Validate document type
+    const validDocumentTypes = ['wsp', 'moa', 'awards_letter', 'application_form', 'proposal'];
+    if (!validDocumentTypes.includes(documentType.toLowerCase())) {
+      return res.status(400).json({ error: "Invalid document type" });
+    }
+    
+    // Determine which table to query based on application number prefix
+    let table, columnName;
+    if (applicationNumber.startsWith('MG')) {
+      table = 'mobile_app_mg_applications';
+      columnName = documentType.toLowerCase() === 'wsp' ? 'wsp_file_path' : 
+                   documentType.toLowerCase() === 'moa' ? 'moa_file_path' : 
+                   'awards_letter_file_path';
+    } else if (applicationNumber.startsWith('DG')) {
+      table = 'mobile_app_dg_applications';
+      columnName = documentType.toLowerCase() === 'application_form' ? 'application_form_path' : 
+                   documentType.toLowerCase() === 'proposal' ? 'proposal_document_path' : 
+                   documentType.toLowerCase() === 'moa' ? 'moa_file_path' : 
+                   'awards_letter_file_path';
+    } else {
+      return res.status(400).json({ error: "Invalid application number format" });
+    }
+    
     const result = await pgPool.query(`
       SELECT 
-        entityid,
-        newfilename,
-        filename,
-        documenttype,
-        module
-      FROM mobile_app_tbl_documents
-    `);
+        ${columnName} as file_path,
+        application_title,
+        organisation_name,
+        application_number
+      FROM ${table} 
+      WHERE application_number = $1
+    `, [applicationNumber]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Application not found" });
+    }
+    
+    const application = result.rows[0];
+    
+    if (!application.file_path) {
+      return res.status(404).json({ error: "Document not available" });
+    }
+    
+    // Extract filename from path
+    const filename = application.file_path.split('/').pop();
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const directDownloadUrl = `/download/document/${encodeURIComponent(filename)}`;
     
     res.json({
       success: true,
-      count: result.rows.length,
-      documents: result.rows
+      message: "Document download ready",
+      documentType: documentType.toUpperCase(),
+      applicationNumber: application.application_number,
+      applicationTitle: application.application_title,
+      organisationName: application.organisation_name,
+      filePath: application.file_path,
+      fileName: filename,
+      downloadUrl: directDownloadUrl,
+      directDownload: `${baseUrl}${directDownloadUrl}`
     });
+    
   } catch (error) {
-    console.error("Database error:", error);
-    res.status(500).json({ error: "Failed to fetch documents" });
+    console.error("Error preparing document download:", error);
+    res.status(500).json({ error: "Failed to prepare document download" });
   }
 });
 
@@ -656,6 +960,89 @@ app.get("/user/:email", async (req, res) => {
   }
 });
 
+// Get Documents Stats by Email
+app.get("/documents-stats/:email", async (req, res) => {
+  const { email } = req.params;
+  
+  try {
+    const result = await pgPool.query(`
+      SELECT 
+        COUNT(*) AS total_documents,
+        COUNT(CASE WHEN approval_status = 'approved' THEN 1 END) AS approved_documents,
+        COUNT(CASE WHEN approval_status = 'pending' THEN 1 END) AS pending_documents,
+        COUNT(CASE WHEN approval_status = 'rejected' THEN 1 END) AS rejected_documents,
+        COALESCE(SUM(file_size), 0) AS total_size
+      FROM mobile_app_uploaded_documents 
+      WHERE email = $1
+    `, [email]);
+    
+    res.json(result.rows[0] || {
+      total_documents: 0,
+      approved_documents: 0,
+      pending_documents: 0,
+      rejected_documents: 0,
+      total_size: 0
+    });
+  } catch (error) {
+    console.error("Error fetching document stats:", error);
+    res.status(500).json({ error: "Failed to fetch document statistics" });
+  }
+});
+
+// Get Organisation Profile by Email
+app.get("/organisation-profile/:email", async (req, res) => {
+  const { email } = req.params;
+  
+  try {
+    const result = await pgPool.query(`
+      SELECT 
+        organisation_name,
+        contract_number,
+        region,
+        programmes_afs,
+        email,
+        contact_person,
+        contact_number,
+        physical_address
+      FROM mobile_app_dg_master 
+      WHERE email = $1
+      LIMIT 1
+    `, [email]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Organisation profile not found" });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error fetching organisation profile:", error);
+    res.status(500).json({ error: "Failed to fetch organisation profile" });
+  }
+});
+
+// Legacy endpoint for compatibility
+app.get("/organisation-contracts", async (req, res) => {
+  try {
+    const result = await pgPool.query(`
+      SELECT 
+        organisation_name,
+        contract_number,
+        programmes_afs,
+        amount_per_moa_gb_approvals,
+        number_of_learners_funded_per_moa,
+        contract_start_date,
+        contract_end_date
+      FROM mobile_app_dg_master 
+      ORDER BY organisation_name
+    `);
+    
+    res.json(result.rows || []);
+  } catch (error) {
+    console.error("Error fetching organisation contracts:", error);
+    res.status(500).json({ error: "Failed to fetch organisation contracts" });
+  }
+});
+
 // ==================== ERROR HANDLING ====================
 
 // 404 Handler
@@ -665,11 +1052,28 @@ app.use((req, res) => {
     availableEndpoints: [
       "/health",
       "/login",
-      "/students/:email", "/student-status/:email", "/documents/:email",
-      "/summary-stats/:email", "/program-breakdown/:email", "/contract-details/:email",
-      "/gm-dashboard/:email", "/organisation-profile/:email",
-      "/mg-status", "/dg-status", "/organisation-details/:email",
-      "/user/:email"
+      "/user/:email",
+      "/students/:email",
+      "/student-status/:email",
+      "/documents/:email",
+      "/download/document/:filename",
+      "/summary-stats/:email",
+      "/program-breakdown/:email",
+      "/contract-details/:email",
+      "/gm-dashboard/:email",
+      "/organisation-profile/:email",
+      "/mg-status",
+      "/dg-status",
+      "/organisation-applications/:email",
+      "/mg-applications-details/:sdlNo",
+      "/dg-applications-details/:sdlNo",
+      "/mg-application-detail/:applicationNumber",
+      "/dg-application-detail/:applicationNumber",
+      "/organisation-detail/:sdlNo",
+      "/download-document/:applicationNumber/:documentType",
+      "/api/download-document/:applicationNumber/:documentType",
+      "/documents-stats/:email",
+      "/organisation-contracts"
     ]
   });
 });
@@ -685,7 +1089,13 @@ app.use((err, req, res, next) => {
 
 // Start Server
 app.listen(port, () => {
-  console.log(`CHIETA Backend Server is running on http://localhost:${port}`);
-  console.log(`Health check: http://localhost:${port}/health`);
-  console.log(`Single login endpoint for all users`);
+  console.log(`🚀 CHIETA Backend Server is running on port ${port}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`✅ Health check: http://localhost:${port}/health`);
+  console.log(`📥 File downloads: http://localhost:${port}/download/document/:filename`);
+  console.log(`👤 Login endpoint: http://localhost:${port}/login`);
+  console.log(`📄 Document download: http://localhost:${port}/download-document/:applicationNumber/:documentType`);
+  console.log(`🏢 Organisation details: http://localhost:${port}/organisation-applications/:email`);
+  console.log(`📊 GMS Dashboard: http://localhost:${port}/gm-dashboard/:email`);
+  console.log(`📱 IMS Dashboard endpoints available`);
 });
