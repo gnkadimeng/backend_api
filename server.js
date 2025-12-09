@@ -40,6 +40,7 @@ app.get("/health", (req, res) => {
       "/student-status/:email",
       "/documents/:email",
       "/download/document/:filename",
+      "/uploads-check",
       "/summary-stats/:email",
       "/program-breakdown/:email",
       "/contract-details/:email",
@@ -58,6 +59,132 @@ app.get("/health", (req, res) => {
       "/organisation-contracts"
     ]
   });
+});
+
+// ==================== UPLOADS CHECK ENDPOINT ====================
+app.get("/uploads-check", (req, res) => {
+  try {
+    const uploadsDir = path.join(__dirname, 'uploads');
+    const exists = fs.existsSync(uploadsDir);
+    const files = exists ? fs.readdirSync(uploadsDir) : [];
+    
+    res.json({
+      uploadsDirectory: uploadsDir,
+      exists: exists,
+      fileCount: files.length,
+      files: files.slice(0, 20), // Show first 20 files
+      message: exists ? "Uploads directory exists" : "Uploads directory not found"
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== FIXED FILE DOWNLOAD ENDPOINT ====================
+app.get("/download/document/:filename", async (req, res) => {
+  const { filename } = req.params;
+  
+  try {
+    // Decode filename
+    const decodedFilename = decodeURIComponent(filename);
+    
+    console.log(`📥 Download requested: ${decodedFilename}`);
+    
+    // Construct file path - Check multiple possible locations
+    const possiblePaths = [
+      path.join(__dirname, 'uploads', decodedFilename),
+      path.join(__dirname, 'public', 'uploads', decodedFilename),
+      path.join(__dirname, '..', 'uploads', decodedFilename),
+      path.join(process.cwd(), 'uploads', decodedFilename),
+      path.join(__dirname, '../uploads', decodedFilename),
+      path.join(__dirname, '../../uploads', decodedFilename)
+    ];
+    
+    let filePath = null;
+    for (const possiblePath of possiblePaths) {
+      if (fs.existsSync(possiblePath)) {
+        filePath = possiblePath;
+        console.log(`✅ File found at: ${possiblePath}`);
+        break;
+      }
+    }
+    
+    // Check if file exists
+    if (!filePath) {
+      console.error(`❌ File not found: ${decodedFilename}`);
+      console.log(`🔍 Searched in: ${possiblePaths.join(', ')}`);
+      
+      // List what's actually in the uploads directory
+      const uploadsDir = path.join(__dirname, 'uploads');
+      if (fs.existsSync(uploadsDir)) {
+        const existingFiles = fs.readdirSync(uploadsDir);
+        console.log(`📁 Files in uploads directory: ${existingFiles.join(', ')}`);
+      }
+      
+      return res.status(404).json({ 
+        error: "File not found",
+        filename: decodedFilename,
+        message: "File not found in uploads directory" 
+      });
+    }
+    
+    // Get file stats
+    const stat = fs.statSync(filePath);
+    
+    // Determine content type based on file extension
+    const ext = path.extname(decodedFilename).toLowerCase();
+    let contentType = 'application/octet-stream';
+    
+    const mimeTypes = {
+      '.pdf': 'application/pdf',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.txt': 'text/plain',
+      '.csv': 'text/csv',
+      '.zip': 'application/zip',
+      '.rar': 'application/x-rar-compressed',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    };
+    
+    contentType = mimeTypes[ext] || 'application/octet-stream';
+    
+    // Set headers for file download
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${decodedFilename}"`);
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    console.log(`📤 Serving file: ${decodedFilename} (${contentType}, ${stat.size} bytes)`);
+    
+    // Stream the file
+    const fileStream = fs.createReadStream(filePath);
+    
+    // Handle stream errors
+    fileStream.on('error', (err) => {
+      console.error('❌ File stream error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Error reading file" });
+      }
+    });
+    
+    fileStream.pipe(res);
+    
+  } catch (error) {
+    console.error("❌ Error downloading file:", error);
+    res.status(500).json({ 
+      error: "Failed to download file",
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
 });
 
 // ==================== SSDD ENDPOINTS ====================
@@ -92,7 +219,7 @@ app.get("/student-status/:email", async (req, res) => {
   }
 });
 
-// Fetch documents based on email
+// UPDATED: Fetch documents based on email with proper URLs
 app.get("/documents/:email", async (req, res) => {
   const { email } = req.params;
   try {
@@ -102,19 +229,42 @@ app.get("/documents/:email", async (req, res) => {
     );
     
     // Get server's base URL dynamically
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const protocol = req.protocol;
+    const host = req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+    
+    console.log(`🔗 Base URL for downloads: ${baseUrl}`);
     
     const documentsWithUrls = result.rows.map((doc) => {
+      if (!doc.file_name) {
+        return {
+          ...doc,
+          file_url: null,
+          download_url: null,
+          file_size: doc.file_size || 'N/A',
+          uploaded_at: doc.uploaded_at || doc.upload_date || new Date().toISOString(),
+          warning: "No filename provided"
+        };
+      }
+      
+      // Clean filename - remove any path components
+      const cleanFilename = doc.file_name.split('/').pop().split('\\').pop();
+      
       // Generate proper download URL
-      const downloadUrl = doc.file_name ? 
-        `${baseUrl}/download/document/${encodeURIComponent(doc.file_name)}` : 
-        null;
+      const downloadUrl = `/download/document/${encodeURIComponent(cleanFilename)}`;
+      const fullDownloadUrl = `${baseUrl}${downloadUrl}`;
+      
+      console.log(`📄 Document: ${cleanFilename} -> ${fullDownloadUrl}`);
       
       return {
         ...doc,
-        file_url: downloadUrl,
+        file_name: cleanFilename, // Ensure clean filename
+        file_url: fullDownloadUrl,
+        download_url: fullDownloadUrl,
+        direct_download_url: downloadUrl,
         file_size: doc.file_size || 'N/A',
-        uploaded_at: doc.uploaded_at || doc.upload_date || new Date().toISOString()
+        uploaded_at: doc.uploaded_at || doc.upload_date || new Date().toISOString(),
+        can_download: true
       };
     });
 
@@ -122,78 +272,6 @@ app.get("/documents/:email", async (req, res) => {
   } catch (error) {
     console.error("Error fetching documents:", error);
     res.status(500).json({ error: "Failed to fetch documents" });
-  }
-});
-
-// Direct file download endpoint
-app.get("/download/document/:filename", async (req, res) => {
-  const { filename } = req.params;
-  
-  try {
-    // Decode filename
-    const decodedFilename = decodeURIComponent(filename);
-    
-    // Construct file path
-    const filePath = path.join(__dirname, 'uploads', decodedFilename);
-    
-    // Check if file exists
-    if (!fs.existsSync(filePath)) {
-      console.error(`File not found: ${filePath}`);
-      return res.status(404).json({ 
-        error: "File not found",
-        filename: decodedFilename 
-      });
-    }
-    
-    // Get file stats
-    const stat = fs.statSync(filePath);
-    
-    // Determine content type based on file extension
-    const ext = path.extname(decodedFilename).toLowerCase();
-    let contentType = 'application/octet-stream';
-    
-    switch(ext) {
-      case '.pdf':
-        contentType = 'application/pdf';
-        break;
-      case '.doc':
-      case '.docx':
-        contentType = 'application/msword';
-        break;
-      case '.xls':
-      case '.xlsx':
-        contentType = 'application/vnd.ms-excel';
-        break;
-      case '.jpg':
-      case '.jpeg':
-        contentType = 'image/jpeg';
-        break;
-      case '.png':
-        contentType = 'image/png';
-        break;
-      case '.txt':
-        contentType = 'text/plain';
-        break;
-    }
-    
-    // Set headers for file download
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${decodedFilename}"`);
-    res.setHeader('Content-Length', stat.size);
-    res.setHeader('Cache-Control', 'no-cache');
-    
-    console.log(`📤 Serving file: ${decodedFilename} (${contentType}, ${stat.size} bytes)`);
-    
-    // Stream the file
-    const fileStream = fs.createReadStream(filePath);
-    fileStream.pipe(res);
-    
-  } catch (error) {
-    console.error("Error downloading file:", error);
-    res.status(500).json({ 
-      error: "Failed to download file",
-      message: error.message 
-    });
   }
 });
 
@@ -842,7 +920,7 @@ app.get("/download-document/:applicationNumber/:documentType", async (req, res) 
     }
     
     // Extract filename from path
-    const filename = application.file_path.split('/').pop();
+    const filename = application.file_path.split('/').pop().split('\\').pop();
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     const directDownloadUrl = `/download/document/${encodeURIComponent(filename)}`;
     
@@ -914,7 +992,7 @@ app.get("/api/download-document/:applicationNumber/:documentType", async (req, r
     }
     
     // Extract filename from path
-    const filename = application.file_path.split('/').pop();
+    const filename = application.file_path.split('/').pop().split('\\').pop();
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     const directDownloadUrl = `/download/document/${encodeURIComponent(filename)}`;
     
@@ -1043,6 +1121,30 @@ app.get("/organisation-contracts", async (req, res) => {
   }
 });
 
+// ==================== CREATE UPLOADS DIRECTORY IF NOT EXISTS ====================
+const ensureUploadsDirectory = () => {
+  const uploadsDir = path.join(__dirname, 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    console.log('📁 Creating uploads directory...');
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log('✅ Uploads directory created:', uploadsDir);
+    
+    // Create a test file for debugging
+    const testFilePath = path.join(uploadsDir, 'test.pdf');
+    if (!fs.existsSync(testFilePath)) {
+      fs.writeFileSync(testFilePath, 'This is a test PDF file for debugging.');
+      console.log('📄 Test file created: test.pdf');
+    }
+  } else {
+    console.log('📁 Uploads directory exists:', uploadsDir);
+    const files = fs.readdirSync(uploadsDir);
+    console.log(`📄 Files in uploads: ${files.length} files`);
+    if (files.length > 0) {
+      console.log('📋 First 5 files:', files.slice(0, 5));
+    }
+  }
+};
+
 // ==================== ERROR HANDLING ====================
 
 // 404 Handler
@@ -1051,6 +1153,7 @@ app.use((req, res) => {
     error: "Endpoint not found",
     availableEndpoints: [
       "/health",
+      "/uploads-check",
       "/login",
       "/user/:email",
       "/students/:email",
@@ -1091,7 +1194,13 @@ app.use((err, req, res, next) => {
 app.listen(port, () => {
   console.log(`🚀 CHIETA Backend Server is running on port ${port}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📁 Checking uploads directory...`);
+  
+  // Ensure uploads directory exists
+  ensureUploadsDirectory();
+  
   console.log(`✅ Health check: http://localhost:${port}/health`);
+  console.log(`📁 Uploads check: http://localhost:${port}/uploads-check`);
   console.log(`📥 File downloads: http://localhost:${port}/download/document/:filename`);
   console.log(`👤 Login endpoint: http://localhost:${port}/login`);
   console.log(`📄 Document download: http://localhost:${port}/download-document/:applicationNumber/:documentType`);
