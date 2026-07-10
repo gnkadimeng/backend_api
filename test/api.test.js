@@ -8,6 +8,21 @@ afterAll(async () => {
   await pgPool.end(); // let Jest exit cleanly
 });
 
+describe('API docs (OpenAPI / Swagger)', () => {
+  test('GET /openapi.json -> 200 valid OpenAPI 3 spec', async () => {
+    const res = await request(app).get('/openapi.json');
+    expect(res.status).toBe(200);
+    expect(res.body.openapi).toBe('3.0.3');
+    expect(Object.keys(res.body.paths).length).toBeGreaterThan(20);
+  });
+
+  test('GET /api-docs -> serves Swagger UI', async () => {
+    const res = await request(app).get('/api-docs/');
+    expect(res.status).toBe(200);
+    expect(res.text).toMatch(/swagger-ui/i);
+  });
+});
+
 describe('health & smoke', () => {
   test('GET /health -> 200 OK', async () => {
     const res = await request(app).get('/health');

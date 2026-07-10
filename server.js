@@ -3,6 +3,8 @@ const cors = require("cors");
 const { Pool } = require("pg");
 const path = require("path");
 const fs = require("fs");
+const swaggerUi = require("swagger-ui-express");
+const openapiSpec = require("./docs/openapi");
 require('dotenv').config();
 
 const app = express();
@@ -14,6 +16,12 @@ app.use(express.json());
 
 // Serve static files from uploads directory
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// API documentation: interactive Swagger UI at /api-docs, raw spec at /openapi.json
+app.get("/openapi.json", (req, res) => res.json(openapiSpec));
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openapiSpec, {
+  customSiteTitle: "CHIETA API Docs",
+}));
 
 // PostgreSQL Connection
 const pgPool = new Pool({
