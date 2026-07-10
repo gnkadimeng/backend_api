@@ -825,21 +825,21 @@ app.get("/organisation-detail/:sdlNo", async (req, res) => {
   
   try {
     const result = await pgPool.query(`
-      SELECT 
+      SELECT
         sdlno AS "SDL_No",
         organisationname AS "Organisation_Name",
         tradingname AS "Trading_Name",
         organisationtype AS "Organisation_Type",
         applicationstatus AS "Approval_Status",
         email,
-        contactperson AS "Contact_Person",
-        contactnumber AS "Contact_Number",
+        NULLIF(TRIM(CONCAT_WS(' ', seniororganisationrepresntivefirstname, seniororganisationrepresntivesurname)), '') AS "Contact_Person",
+        organisationtellno AS "Contact_Number",
         province,
-        city,
-        address,
-        datecreated AS "Date_Created",
-        lastupdated AS "Last_Updated"
-      FROM mobile_app_organisation 
+        municipality AS city,
+        physicaladdress1 AS address,
+        NULL AS "Date_Created",
+        NULL AS "Last_Updated"
+      FROM mobile_app_organisation
       WHERE sdlno = $1
       LIMIT 1
     `, [sdlNo]);
@@ -1028,22 +1028,21 @@ app.get("/documents-stats/:email", async (req, res) => {
   
   try {
     const result = await pgPool.query(`
-      SELECT 
-        COUNT(*) AS total_documents,
-        COUNT(CASE WHEN approval_status = 'approved' THEN 1 END) AS approved_documents,
-        COUNT(CASE WHEN approval_status = 'pending' THEN 1 END) AS pending_documents,
-        COUNT(CASE WHEN approval_status = 'rejected' THEN 1 END) AS rejected_documents,
-        COALESCE(SUM(file_size), 0) AS total_size
-      FROM mobile_app_uploaded_documents 
+      SELECT
+        COUNT(*)::int AS total_documents,
+        COUNT(DISTINCT document_type)::int AS document_types,
+        MAX(uploaded_at) AS last_uploaded_at
+      FROM mobile_app_uploaded_documents
       WHERE email = $1
     `, [email]);
-    
+    // mobile_app_uploaded_documents has no approval_status / file_size columns,
+    // so those metrics are not derivable here and are omitted rather than
+    // fabricated. Approval status is tracked on the application records.
+
     res.json(result.rows[0] || {
       total_documents: 0,
-      approved_documents: 0,
-      pending_documents: 0,
-      rejected_documents: 0,
-      total_size: 0
+      document_types: 0,
+      last_uploaded_at: null
     });
   } catch (error) {
     console.error("Error fetching document stats:", error);
@@ -1057,17 +1056,18 @@ app.get("/organisation-profile/:email", async (req, res) => {
   
   try {
     const result = await pgPool.query(`
-      SELECT 
-        organisation_name,
-        contract_number,
-        region,
-        programmes_afs,
-        email,
-        contact_person,
-        contact_number,
-        physical_address
-      FROM mobile_app_dg_master 
-      WHERE email = $1
+      SELECT
+        dm.organisation_name,
+        dm.contract_number,
+        dm.region,
+        dm.programmes_afs,
+        dm.email,
+        NULLIF(TRIM(CONCAT_WS(' ', o.seniororganisationrepresntivefirstname, o.seniororganisationrepresntivesurname)), '') AS contact_person,
+        o.organisationtellno AS contact_number,
+        o.physicaladdress1 AS physical_address
+      FROM mobile_app_dg_master dm
+      LEFT JOIN mobile_app_organisation o ON o.email = dm.email
+      WHERE dm.email = $1
       LIMIT 1
     `, [email]);
     
@@ -1174,21 +1174,22 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start Server
-app.listen(port, () => {
-  console.log(`🚀 CHIETA Backend Server is running on port ${port}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📁 Checking uploads directory...`);
-  
-  // Ensure uploads directory exists
-  ensureUploadsDirectory();
-  
-  console.log(`✅ Health check: http://localhost:${port}/health`);
-  console.log(`📁 Uploads check: http://localhost:${port}/uploads-check`);
-  console.log(`📥 File downloads: http://localhost:${port}/download/document/:filename`);
-  console.log(`👤 Login endpoint: http://localhost:${port}/login`);
-  console.log(`📄 Document download: http://localhost:${port}/download-document/:applicationNumber/:documentType`);
-  console.log(`🏢 Organisation details: http://localhost:${port}/organisation-applications/:email`);
-  console.log(`📊 GMS Dashboard: http://localhost:${port}/gm-dashboard/:email`);
-  console.log(`📱 IMS Dashboard endpoints available`);
-});
+// Start Server — only when run directly (`node server.js`), NOT when imported
+// by the test suite (Supertest imports `app` without opening a socket).
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`🚀 CHIETA Backend Server is running on port ${port}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`📁 Checking uploads directory...`);
+
+    // Ensure uploads directory exists
+    ensureUploadsDirectory();
+
+    console.log(`✅ Health check: http://localhost:${port}/health`);
+    console.log(`👤 Login endpoint: http://localhost:${port}/login`);
+    console.log(`📊 GMS Dashboard: http://localhost:${port}/gm-dashboard/:email`);
+  });
+}
+
+// Export the app (for Supertest) and the pool (so tests can close it cleanly).
+module.exports = { app, pgPool };
