@@ -1,6 +1,6 @@
 # CHIETA Backend API
 
-REST API powering the CHIETA mobile application — authentication, grant dashboards, organisation data, and documents. Node.js / Express / PostgreSQL.
+REST API powering the CHIETA mobile application authentication, grant dashboards, organisation data, and documents. Node.js / Express / PostgreSQL.
 
 ## Quick start
 
