@@ -3,7 +3,18 @@ const cors = require("cors");
 const { Pool } = require("pg");
 const path = require("path");
 const fs = require("fs");
+const swaggerUi = require("swagger-ui-express");
+const openapiSpec = require("./docs/openapi");
 require('dotenv').config();
+const { signToken, hashPassword, verifyPassword, requireAuth } = require("./auth");
+
+// Fail fast on missing configuration — no silent misconfiguration.
+const REQUIRED_ENV = ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER_NAME", "DB_PASSWORD", "SECRET_KEY"];
+const missingEnv = REQUIRED_ENV.filter((k) => !process.env[k]);
+if (missingEnv.length) {
+  console.error(`Missing required env vars: ${missingEnv.join(", ")}. See .env.example.`);
+  process.exit(1);
+}
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -14,6 +25,16 @@ app.use(express.json());
 
 // Serve static files from uploads directory
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// API documentation: interactive Swagger UI at /api-docs, raw spec at /openapi.json
+app.get("/openapi.json", (req, res) => res.json(openapiSpec));
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openapiSpec, {
+  customSiteTitle: "CHIETA API Docs",
+}));
+
+// Authentication + object-level authorization on every non-public route.
+// Public routes (/health, /login, /api-docs, ...) are skipped inside requireAuth.
+app.use(requireAuth);
 
 // PostgreSQL Connection
 const pgPool = new Pool({
@@ -268,26 +289,43 @@ app.post("/login", async (req, res) => {
   }
 
   try {
+    // Fetch by email only, then verify the password in code (bcrypt or legacy
+    // plaintext). Never compare passwords in SQL.
     const query = `
-      SELECT 
-        email, 
-        accounttype, 
-        is_active, 
+      SELECT
+        email,
+        accounttype,
+        is_active,
         is_placed,
         password
       FROM mobile_app_login
-      WHERE email = $1 AND password = $2
-        AND accountstatus = TRUE
+      WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) AND accountstatus = TRUE
       LIMIT 1
     `;
-    
-    const { rows } = await pgPool.query(query, [email, password]);
-    
+
+    const { rows } = await pgPool.query(query, [email]);
+
     if (rows.length === 0) {
       return res.status(401).json({ message: "Invalid credentials or account not active" });
     }
 
     const user = rows[0];
+
+    const { ok, needsUpgrade } = await verifyPassword(password, user.password);
+    if (!ok) {
+      return res.status(401).json({ message: "Invalid credentials or account not active" });
+    }
+
+    // Transparent migration: re-hash a legacy plaintext password on success.
+    if (needsUpgrade) {
+      try {
+        const hashed = await hashPassword(password);
+        await pgPool.query("UPDATE mobile_app_login SET password = $1 WHERE email = $2", [hashed, email]);
+      } catch (e) {
+        console.warn("Password upgrade-on-login failed (non-fatal):", e.message);
+      }
+    }
+
     let additionalData = {};
 
     if (user.accounttype === 'Company') {
@@ -309,6 +347,7 @@ app.post("/login", async (req, res) => {
 
     const response = {
       message: "Login successful",
+      token: signToken(user),
       user: {
         email: user.email,
         accounttype: user.accounttype,
@@ -825,21 +864,21 @@ app.get("/organisation-detail/:sdlNo", async (req, res) => {
   
   try {
     const result = await pgPool.query(`
-      SELECT 
+      SELECT
         sdlno AS "SDL_No",
         organisationname AS "Organisation_Name",
         tradingname AS "Trading_Name",
         organisationtype AS "Organisation_Type",
         applicationstatus AS "Approval_Status",
         email,
-        contactperson AS "Contact_Person",
-        contactnumber AS "Contact_Number",
+        NULLIF(TRIM(CONCAT_WS(' ', seniororganisationrepresntivefirstname, seniororganisationrepresntivesurname)), '') AS "Contact_Person",
+        organisationtellno AS "Contact_Number",
         province,
-        city,
-        address,
-        datecreated AS "Date_Created",
-        lastupdated AS "Last_Updated"
-      FROM mobile_app_organisation 
+        municipality AS city,
+        physicaladdress1 AS address,
+        NULL AS "Date_Created",
+        NULL AS "Last_Updated"
+      FROM mobile_app_organisation
       WHERE sdlno = $1
       LIMIT 1
     `, [sdlNo]);
@@ -1028,22 +1067,21 @@ app.get("/documents-stats/:email", async (req, res) => {
   
   try {
     const result = await pgPool.query(`
-      SELECT 
-        COUNT(*) AS total_documents,
-        COUNT(CASE WHEN approval_status = 'approved' THEN 1 END) AS approved_documents,
-        COUNT(CASE WHEN approval_status = 'pending' THEN 1 END) AS pending_documents,
-        COUNT(CASE WHEN approval_status = 'rejected' THEN 1 END) AS rejected_documents,
-        COALESCE(SUM(file_size), 0) AS total_size
-      FROM mobile_app_uploaded_documents 
+      SELECT
+        COUNT(*)::int AS total_documents,
+        COUNT(DISTINCT document_type)::int AS document_types,
+        MAX(uploaded_at) AS last_uploaded_at
+      FROM mobile_app_uploaded_documents
       WHERE email = $1
     `, [email]);
-    
+    // mobile_app_uploaded_documents has no approval_status / file_size columns,
+    // so those metrics are not derivable here and are omitted rather than
+    // fabricated. Approval status is tracked on the application records.
+
     res.json(result.rows[0] || {
       total_documents: 0,
-      approved_documents: 0,
-      pending_documents: 0,
-      rejected_documents: 0,
-      total_size: 0
+      document_types: 0,
+      last_uploaded_at: null
     });
   } catch (error) {
     console.error("Error fetching document stats:", error);
@@ -1057,17 +1095,18 @@ app.get("/organisation-profile/:email", async (req, res) => {
   
   try {
     const result = await pgPool.query(`
-      SELECT 
-        organisation_name,
-        contract_number,
-        region,
-        programmes_afs,
-        email,
-        contact_person,
-        contact_number,
-        physical_address
-      FROM mobile_app_dg_master 
-      WHERE email = $1
+      SELECT
+        dm.organisation_name,
+        dm.contract_number,
+        dm.region,
+        dm.programmes_afs,
+        dm.email,
+        NULLIF(TRIM(CONCAT_WS(' ', o.seniororganisationrepresntivefirstname, o.seniororganisationrepresntivesurname)), '') AS contact_person,
+        o.organisationtellno AS contact_number,
+        o.physicaladdress1 AS physical_address
+      FROM mobile_app_dg_master dm
+      LEFT JOIN mobile_app_organisation o ON o.email = dm.email
+      WHERE dm.email = $1
       LIMIT 1
     `, [email]);
     
@@ -1174,21 +1213,22 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start Server
-app.listen(port, () => {
-  console.log(`🚀 CHIETA Backend Server is running on port ${port}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📁 Checking uploads directory...`);
-  
-  // Ensure uploads directory exists
-  ensureUploadsDirectory();
-  
-  console.log(`✅ Health check: http://localhost:${port}/health`);
-  console.log(`📁 Uploads check: http://localhost:${port}/uploads-check`);
-  console.log(`📥 File downloads: http://localhost:${port}/download/document/:filename`);
-  console.log(`👤 Login endpoint: http://localhost:${port}/login`);
-  console.log(`📄 Document download: http://localhost:${port}/download-document/:applicationNumber/:documentType`);
-  console.log(`🏢 Organisation details: http://localhost:${port}/organisation-applications/:email`);
-  console.log(`📊 GMS Dashboard: http://localhost:${port}/gm-dashboard/:email`);
-  console.log(`📱 IMS Dashboard endpoints available`);
-});
+// Start Server — only when run directly (`node server.js`), NOT when imported
+// by the test suite (Supertest imports `app` without opening a socket).
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`🚀 CHIETA Backend Server is running on port ${port}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`📁 Checking uploads directory...`);
+
+    // Ensure uploads directory exists
+    ensureUploadsDirectory();
+
+    console.log(`✅ Health check: http://localhost:${port}/health`);
+    console.log(`👤 Login endpoint: http://localhost:${port}/login`);
+    console.log(`📊 GMS Dashboard: http://localhost:${port}/gm-dashboard/:email`);
+  });
+}
+
+// Export the app (for Supertest) and the pool (so tests can close it cleanly).
+module.exports = { app, pgPool };
