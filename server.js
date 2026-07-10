@@ -299,7 +299,7 @@ app.post("/login", async (req, res) => {
         is_placed,
         password
       FROM mobile_app_login
-      WHERE email = $1 AND accountstatus = TRUE
+      WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) AND accountstatus = TRUE
       LIMIT 1
     `;
 

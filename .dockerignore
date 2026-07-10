@@ -1,0 +1,10 @@
+node_modules
+.git
+.github
+test
+coverage
+dist
+*.log
+.env
+.env.local
+render_integrated_database.dump

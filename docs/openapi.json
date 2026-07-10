@@ -1,0 +1,1895 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "CHIETA Backend API",
+    "version": "1.0.0",
+    "description": "REST API powering the CHIETA mobile application (grants, dashboards, documents).\n\n### Authentication\n1. `POST /login` with `{ email, password }` → returns a JWT `token`.\n2. Send it on every other request: `Authorization: Bearer <token>`.\n\nEmail-keyed resources are **owner-scoped** — you may only read your own data\n(Administrators may read any). Public routes: `/health`, `/login`, these docs."
+  },
+  "servers": [
+    {
+      "url": "https://ssdd.chieta.org.za/mobile-api",
+      "description": "Production (via VPN)"
+    },
+    {
+      "url": "http://localhost:5000",
+      "description": "Local"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "System"
+    },
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Users"
+    },
+    {
+      "name": "Students"
+    },
+    {
+      "name": "Documents"
+    },
+    {
+      "name": "GM Dashboard"
+    },
+    {
+      "name": "IM Dashboard"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "company@example.com"
+          },
+          "password": {
+            "type": "string",
+            "example": "secret"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "accounttype": {
+            "type": "string",
+            "example": "Company"
+          },
+          "is_active": {
+            "type": "integer"
+          },
+          "is_placed": {
+            "type": "integer"
+          }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "Login successful"
+          },
+          "token": {
+            "type": "string",
+            "description": "JWT bearer token"
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string",
+                "format": "email"
+              },
+              "accounttype": {
+                "type": "string"
+              },
+              "is_active": {
+                "type": "integer"
+              },
+              "is_placed": {
+                "type": "integer"
+              },
+              "organisation_name": {
+                "type": "string"
+              },
+              "contract_number": {
+                "type": "string"
+              },
+              "region": {
+                "type": "string"
+              },
+              "programmes_afs": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "DocumentsStats": {
+        "type": "object",
+        "properties": {
+          "total_documents": {
+            "type": "integer"
+          },
+          "document_types": {
+            "type": "integer"
+          },
+          "last_uploaded_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "Document": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "document_type": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "file_format": {
+            "type": "string"
+          },
+          "uploaded_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Student": {
+        "type": "object",
+        "description": "Row from mobile_app_student_decision_outcome (all columns).",
+        "additionalProperties": true
+      },
+      "SummaryStats": {
+        "type": "object",
+        "properties": {
+          "totalfunding": {
+            "type": "string"
+          },
+          "totallearners": {
+            "type": "string"
+          },
+          "avgperlearner": {
+            "type": "string"
+          },
+          "totalcontracts": {
+            "type": "string"
+          }
+        }
+      },
+      "ProgramBreakdown": {
+        "type": "object",
+        "properties": {
+          "program": {
+            "type": "string"
+          },
+          "count": {
+            "type": "string"
+          },
+          "totalamount": {
+            "type": "string"
+          },
+          "learners": {
+            "type": "string"
+          }
+        }
+      },
+      "Contract": {
+        "type": "object",
+        "properties": {
+          "organisation_name": {
+            "type": "string"
+          },
+          "contract_number": {
+            "type": "string"
+          },
+          "short_contract_number": {
+            "type": "string"
+          },
+          "programmes_afs": {
+            "type": "string"
+          },
+          "amount_per_moa_gb_approvals": {
+            "type": "string"
+          },
+          "number_of_learners_funded_per_moa": {
+            "type": "integer"
+          },
+          "contract_start_date": {
+            "type": "string"
+          },
+          "contract_end_date": {
+            "type": "string"
+          },
+          "funding_window_name": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "cost_code": {
+            "type": "string"
+          },
+          "dg_year": {
+            "type": "string"
+          },
+          "cycle": {
+            "type": "string"
+          }
+        }
+      },
+      "ContractSummary": {
+        "type": "object",
+        "properties": {
+          "organisation_name": {
+            "type": "string"
+          },
+          "contract_number": {
+            "type": "string"
+          },
+          "programmes_afs": {
+            "type": "string"
+          },
+          "amount_per_moa_gb_approvals": {
+            "type": "string"
+          },
+          "number_of_learners_funded_per_moa": {
+            "type": "integer"
+          },
+          "contract_start_date": {
+            "type": "string"
+          },
+          "contract_end_date": {
+            "type": "string"
+          }
+        }
+      },
+      "GmDashboard": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/SummaryStats"
+          },
+          "programBreakdown": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgramBreakdown"
+            }
+          },
+          "recentContracts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Contract"
+            }
+          },
+          "userEmail": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
+      "OrganisationProfile": {
+        "type": "object",
+        "properties": {
+          "organisation_name": {
+            "type": "string"
+          },
+          "contract_number": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "programmes_afs": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "contact_person": {
+            "type": "string",
+            "nullable": true
+          },
+          "contact_number": {
+            "type": "string",
+            "nullable": true
+          },
+          "physical_address": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "OrganisationApplication": {
+        "type": "object",
+        "properties": {
+          "SDL_No": {
+            "type": "string"
+          },
+          "Organisation_Name": {
+            "type": "string"
+          },
+          "Trading_Name": {
+            "type": "string"
+          },
+          "Organisation_Type": {
+            "type": "string"
+          },
+          "Approval_Status": {
+            "type": "string"
+          },
+          "dg_applications_count": {
+            "type": "string"
+          },
+          "dg_total_funding": {
+            "type": "string"
+          },
+          "dg_total_learners": {
+            "type": "string"
+          },
+          "has_dg_applications": {
+            "type": "boolean"
+          },
+          "mg_applications_count": {
+            "type": "string"
+          },
+          "has_mg_applications": {
+            "type": "boolean"
+          },
+          "wsp_approved_count": {
+            "type": "string"
+          },
+          "wsp_pending_count": {
+            "type": "string"
+          },
+          "wsp_rejected_count": {
+            "type": "string"
+          },
+          "moa_approved_count": {
+            "type": "string"
+          },
+          "moa_pending_count": {
+            "type": "string"
+          },
+          "moa_rejected_count": {
+            "type": "string"
+          },
+          "awards_approved_count": {
+            "type": "string"
+          },
+          "awards_pending_count": {
+            "type": "string"
+          },
+          "awards_rejected_count": {
+            "type": "string"
+          },
+          "total_applications": {
+            "type": "string"
+          }
+        }
+      },
+      "OrganisationDetail": {
+        "type": "object",
+        "properties": {
+          "SDL_No": {
+            "type": "string"
+          },
+          "Organisation_Name": {
+            "type": "string"
+          },
+          "Trading_Name": {
+            "type": "string"
+          },
+          "Organisation_Type": {
+            "type": "string"
+          },
+          "Approval_Status": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "Contact_Person": {
+            "type": "string",
+            "nullable": true
+          },
+          "Contact_Number": {
+            "type": "string",
+            "nullable": true
+          },
+          "province": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "Date_Created": {
+            "type": "string",
+            "nullable": true
+          },
+          "Last_Updated": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "MgWindow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
+          "startdate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "extensionDate": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "DgWindow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "launchDte": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadlineTime": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Application": {
+        "type": "object",
+        "description": "Grant application detail (all columns from the application table).",
+        "additionalProperties": true
+      },
+      "HealthStatus": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "OK"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Service health check",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uploads-check": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Uploads directory status",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Authenticate and get a JWT",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing email or password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials / inactive account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/{email}": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get a user by email",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "example": "company@example.com"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token valid but not your resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/students/{email}": {
+      "get": {
+        "tags": [
+          "Students"
+        ],
+        "summary": "Students / learner outcomes for a company",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "example": "company@example.com"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Student"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token valid but not your resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/student-status/{email}": {
+      "get": {
+        "tags": [
+          "Students"
+        ],
+        "summary": "Student placement status",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "example": "company@example.com"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Student"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token valid but not your resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents/{email}": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Uploaded documents",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "example": "company@example.com"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Document"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token valid but not your resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documents-stats/{email}": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Document upload statistics",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "example": "company@example.com"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentsStats"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token valid but not your resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/download/document/{filename}": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Download a stored file",
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File stream",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/download-document/{applicationNumber}/{documentType}": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Download an application document",
+        "parameters": [
+          {
+            "name": "applicationNumber",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "MG2025-001"
+          },
+          {
+            "name": "documentType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "wsp",
+                "moa",
+                "awards_letter",
+                "application_form",
+                "proposal"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File stream",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid document type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/summary-stats/{email}": {
+      "get": {
+        "tags": [
+          "GM Dashboard"
+        ],
+        "summary": "Funding summary statistics",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "example": "company@example.com"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SummaryStats"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token valid but not your resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/program-breakdown/{email}": {
+      "get": {
+        "tags": [
+          "GM Dashboard"
+        ],
+        "summary": "Funding by programme",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "example": "company@example.com"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProgramBreakdown"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token valid but not your resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/contract-details/{email}": {
+      "get": {
+        "tags": [
+          "GM Dashboard"
+        ],
+        "summary": "Contract details",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "example": "company@example.com"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Contract"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token valid but not your resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gm-dashboard/{email}": {
+      "get": {
+        "tags": [
+          "GM Dashboard"
+        ],
+        "summary": "Full GM dashboard payload",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "example": "company@example.com"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GmDashboard"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token valid but not your resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organisation-profile/{email}": {
+      "get": {
+        "tags": [
+          "GM Dashboard"
+        ],
+        "summary": "Organisation profile (joined contact info)",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "example": "company@example.com"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganisationProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token valid but not your resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mg-status": {
+      "get": {
+        "tags": [
+          "IM Dashboard"
+        ],
+        "summary": "Mandatory grant windows",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MgWindow"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dg-status": {
+      "get": {
+        "tags": [
+          "IM Dashboard"
+        ],
+        "summary": "Discretionary grant windows",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DgWindow"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organisation-applications/{email}": {
+      "get": {
+        "tags": [
+          "IM Dashboard"
+        ],
+        "summary": "Applications summary per organisation",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "example": "company@example.com"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrganisationApplication"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token valid but not your resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organisation-contracts": {
+      "get": {
+        "tags": [
+          "IM Dashboard"
+        ],
+        "summary": "All organisation contracts (legacy)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ContractSummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organisation-detail/{sdlNo}": {
+      "get": {
+        "tags": [
+          "IM Dashboard"
+        ],
+        "summary": "Organisation detail by SDL number",
+        "parameters": [
+          {
+            "name": "sdlNo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "L510798004"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganisationDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mg-applications-details/{sdlNo}": {
+      "get": {
+        "tags": [
+          "IM Dashboard"
+        ],
+        "summary": "MG applications for an SDL",
+        "parameters": [
+          {
+            "name": "sdlNo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "L510798004"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Application"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dg-applications-details/{sdlNo}": {
+      "get": {
+        "tags": [
+          "IM Dashboard"
+        ],
+        "summary": "DG applications for an SDL",
+        "parameters": [
+          {
+            "name": "sdlNo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "L510798004"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Application"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mg-application-detail/{applicationNumber}": {
+      "get": {
+        "tags": [
+          "IM Dashboard"
+        ],
+        "summary": "Single MG application",
+        "parameters": [
+          {
+            "name": "applicationNumber",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "MG2025-001"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dg-application-detail/{applicationNumber}": {
+      "get": {
+        "tags": [
+          "IM Dashboard"
+        ],
+        "summary": "Single DG application",
+        "parameters": [
+          {
+            "name": "applicationNumber",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "MG2025-001"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
