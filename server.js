@@ -6,6 +6,15 @@ const fs = require("fs");
 const swaggerUi = require("swagger-ui-express");
 const openapiSpec = require("./docs/openapi");
 require('dotenv').config();
+const { signToken, hashPassword, verifyPassword, requireAuth } = require("./auth");
+
+// Fail fast on missing configuration — no silent misconfiguration.
+const REQUIRED_ENV = ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER_NAME", "DB_PASSWORD", "SECRET_KEY"];
+const missingEnv = REQUIRED_ENV.filter((k) => !process.env[k]);
+if (missingEnv.length) {
+  console.error(`Missing required env vars: ${missingEnv.join(", ")}. See .env.example.`);
+  process.exit(1);
+}
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -22,6 +31,10 @@ app.get("/openapi.json", (req, res) => res.json(openapiSpec));
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openapiSpec, {
   customSiteTitle: "CHIETA API Docs",
 }));
+
+// Authentication + object-level authorization on every non-public route.
+// Public routes (/health, /login, /api-docs, ...) are skipped inside requireAuth.
+app.use(requireAuth);
 
 // PostgreSQL Connection
 const pgPool = new Pool({
@@ -276,26 +289,43 @@ app.post("/login", async (req, res) => {
   }
 
   try {
+    // Fetch by email only, then verify the password in code (bcrypt or legacy
+    // plaintext). Never compare passwords in SQL.
     const query = `
-      SELECT 
-        email, 
-        accounttype, 
-        is_active, 
+      SELECT
+        email,
+        accounttype,
+        is_active,
         is_placed,
         password
       FROM mobile_app_login
-      WHERE email = $1 AND password = $2
-        AND accountstatus = TRUE
+      WHERE email = $1 AND accountstatus = TRUE
       LIMIT 1
     `;
-    
-    const { rows } = await pgPool.query(query, [email, password]);
-    
+
+    const { rows } = await pgPool.query(query, [email]);
+
     if (rows.length === 0) {
       return res.status(401).json({ message: "Invalid credentials or account not active" });
     }
 
     const user = rows[0];
+
+    const { ok, needsUpgrade } = await verifyPassword(password, user.password);
+    if (!ok) {
+      return res.status(401).json({ message: "Invalid credentials or account not active" });
+    }
+
+    // Transparent migration: re-hash a legacy plaintext password on success.
+    if (needsUpgrade) {
+      try {
+        const hashed = await hashPassword(password);
+        await pgPool.query("UPDATE mobile_app_login SET password = $1 WHERE email = $2", [hashed, email]);
+      } catch (e) {
+        console.warn("Password upgrade-on-login failed (non-fatal):", e.message);
+      }
+    }
+
     let additionalData = {};
 
     if (user.accounttype === 'Company') {
@@ -317,6 +347,7 @@ app.post("/login", async (req, res) => {
 
     const response = {
       message: "Login successful",
+      token: signToken(user),
       user: {
         email: user.email,
         accounttype: user.accounttype,

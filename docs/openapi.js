@@ -18,20 +18,23 @@ const applicationNumberParam = {
 };
 
 // Common responses
-const NotFound = { description: 'Resource not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } };
-const ServerError = { description: 'Server error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } };
+const errRef = { content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } };
+const NotFound = { description: 'Resource not found', ...errRef };
+const ServerError = { description: 'Server error', ...errRef };
+const Unauthorized = { description: 'Missing or invalid token', ...errRef };
+const Forbidden = { description: 'Token valid but not authorized for this resource', ...errRef };
 const okArray = { description: 'OK', content: { 'application/json': { schema: { type: 'array', items: { type: 'object' } } } } };
 const okObject = { description: 'OK', content: { 'application/json': { schema: { type: 'object' } } } };
 
-// Helper: a GET endpoint keyed by :email
+// Helper: a GET endpoint keyed by :email (owner-scoped -> can 403)
 const byEmail = (tag, summary) => ({
-  get: { tags: [tag], summary, parameters: [emailParam], responses: { 200: okObject, 404: NotFound, 500: ServerError } },
+  get: { tags: [tag], summary, parameters: [emailParam], responses: { 200: okObject, 401: Unauthorized, 403: Forbidden, 404: NotFound, 500: ServerError } },
 });
 const bySdl = (tag, summary) => ({
-  get: { tags: [tag], summary, parameters: [sdlNoParam], responses: { 200: okObject, 404: NotFound, 500: ServerError } },
+  get: { tags: [tag], summary, parameters: [sdlNoParam], responses: { 200: okObject, 401: Unauthorized, 404: NotFound, 500: ServerError } },
 });
 const byApp = (tag, summary) => ({
-  get: { tags: [tag], summary, parameters: [applicationNumberParam], responses: { 200: okObject, 404: NotFound, 500: ServerError } },
+  get: { tags: [tag], summary, parameters: [applicationNumberParam], responses: { 200: okObject, 401: Unauthorized, 404: NotFound, 500: ServerError } },
 });
 
 module.exports = {
@@ -42,21 +45,24 @@ module.exports = {
     description: [
       'REST API powering the CHIETA mobile application (grants, dashboards, documents).',
       '',
-      '> **Security note:** these endpoints currently require **no authentication** — any',
-      "> caller can read a user's data by supplying their email/SDL in the path. This is a",
-      '> known gap (broken access control / IDOR) tracked for remediation; the docs',
-      '> describe current behaviour, not the target security model.',
+      '**Auth:** obtain a JWT from `POST /login`, then send it as `Authorization: Bearer <token>`.',
+      'All endpoints require it except `/health`, `/login`, and these docs. Email-keyed',
+      'resources are owner-scoped (you may only read your own data; Administrators may read any).',
     ].join('\n'),
   },
   servers: [
     { url: 'http://localhost:5000', description: 'Local' },
     { url: '/', description: 'Same origin' },
   ],
+  security: [{ bearerAuth: [] }],
   tags: [
     { name: 'System' }, { name: 'Auth' }, { name: 'Users' }, { name: 'Students' },
     { name: 'Documents' }, { name: 'GM Dashboard' }, { name: 'IM Dashboard' },
   ],
   components: {
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+    },
     schemas: {
       Error: { type: 'object', properties: { error: { type: 'string' }, message: { type: 'string' } } },
       LoginRequest: {
@@ -67,6 +73,7 @@ module.exports = {
         type: 'object',
         properties: {
           message: { type: 'string', example: 'Login successful' },
+          token: { type: 'string', description: 'JWT bearer token', example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
           user: {
             type: 'object',
             properties: {
@@ -85,12 +92,12 @@ module.exports = {
     },
   },
   paths: {
-    '/health': { get: { tags: ['System'], summary: 'Service health check', responses: { 200: { description: 'OK', content: { 'application/json': { schema: { type: 'object', properties: { status: { type: 'string', example: 'OK' } } } } } } } } },
-    '/uploads-check': { get: { tags: ['System'], summary: 'Uploads directory status', responses: { 200: okObject } } },
+    '/health': { get: { tags: ['System'], summary: 'Service health check', security: [], responses: { 200: { description: 'OK', content: { 'application/json': { schema: { type: 'object', properties: { status: { type: 'string', example: 'OK' } } } } } } } } },
+    '/uploads-check': { get: { tags: ['System'], summary: 'Uploads directory status', security: [], responses: { 200: okObject } } },
 
     '/login': {
       post: {
-        tags: ['Auth'], summary: 'Authenticate a user',
+        tags: ['Auth'], summary: 'Authenticate a user', security: [],
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/LoginRequest' } } } },
         responses: {
           200: { description: 'Login successful', content: { 'application/json': { schema: { $ref: '#/components/schemas/LoginResponse' } } } },

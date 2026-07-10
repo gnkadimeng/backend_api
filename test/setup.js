@@ -7,3 +7,4 @@ process.env.DB_NAME = process.env.DB_NAME || 'chieta_test';
 process.env.DB_USER_NAME = process.env.DB_USER_NAME || 'postgres';
 process.env.DB_PASSWORD = process.env.DB_PASSWORD || 'postgres';
 process.env.DB_SSLMODE = process.env.DB_SSLMODE || ''; // no SSL for local/CI Postgres
+process.env.SECRET_KEY = process.env.SECRET_KEY || 'test-secret-not-for-prod';
