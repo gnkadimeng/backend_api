@@ -80,7 +80,7 @@ app.get("/uploads-check", (req, res) => {
   }
 });
 
-// ==================== FIXED FILE DOWNLOAD ENDPOINT ====================
+// ==================== SIMPLIFIED FILE DOWNLOAD ENDPOINT ====================
 app.get("/download/document/:filename", async (req, res) => {
   const { filename } = req.params;
   
@@ -90,29 +90,14 @@ app.get("/download/document/:filename", async (req, res) => {
     
     console.log(`📥 Download requested: ${decodedFilename}`);
     
-    // Construct file path - Check multiple possible locations
-    const possiblePaths = [
-      path.join(__dirname, 'uploads', decodedFilename),
-      path.join(__dirname, 'public', 'uploads', decodedFilename),
-      path.join(__dirname, '..', 'uploads', decodedFilename),
-      path.join(process.cwd(), 'uploads', decodedFilename),
-      path.join(__dirname, '../uploads', decodedFilename),
-      path.join(__dirname, '../../uploads', decodedFilename)
-    ];
+    // Simple file path construction - FIXED
+    const filePath = path.join(__dirname, 'uploads', decodedFilename);
     
-    let filePath = null;
-    for (const possiblePath of possiblePaths) {
-      if (fs.existsSync(possiblePath)) {
-        filePath = possiblePath;
-        console.log(`✅ File found at: ${possiblePath}`);
-        break;
-      }
-    }
+    console.log(`🔍 Looking for file at: ${filePath}`);
     
     // Check if file exists
-    if (!filePath) {
+    if (!fs.existsSync(filePath)) {
       console.error(`❌ File not found: ${decodedFilename}`);
-      console.log(`🔍 Searched in: ${possiblePaths.join(', ')}`);
       
       // List what's actually in the uploads directory
       const uploadsDir = path.join(__dirname, 'uploads');
@@ -124,6 +109,7 @@ app.get("/download/document/:filename", async (req, res) => {
       return res.status(404).json({ 
         error: "File not found",
         filename: decodedFilename,
+        searchedPath: filePath,
         message: "File not found in uploads directory" 
       });
     }
@@ -181,8 +167,7 @@ app.get("/download/document/:filename", async (req, res) => {
     console.error("❌ Error downloading file:", error);
     res.status(500).json({ 
       error: "Failed to download file",
-      message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      message: error.message
     });
   }
 });
@@ -219,7 +204,7 @@ app.get("/student-status/:email", async (req, res) => {
   }
 });
 
-// UPDATED: Fetch documents based on email with proper URLs
+// Fetch documents based on email with FIXED download URLs
 app.get("/documents/:email", async (req, res) => {
   const { email } = req.params;
   try {
@@ -250,17 +235,16 @@ app.get("/documents/:email", async (req, res) => {
       // Clean filename - remove any path components
       const cleanFilename = doc.file_name.split('/').pop().split('\\').pop();
       
-      // Generate proper download URL
-      const downloadUrl = `/download/document/${encodeURIComponent(cleanFilename)}`;
-      const fullDownloadUrl = `${baseUrl}${downloadUrl}`;
+      // FIXED: Generate proper download URL
+      const downloadUrl = `${baseUrl}/download/document/${encodeURIComponent(cleanFilename)}`;
       
-      console.log(`📄 Document: ${cleanFilename} -> ${fullDownloadUrl}`);
+      console.log(`📄 Document: ${cleanFilename} -> ${downloadUrl}`);
       
       return {
         ...doc,
         file_name: cleanFilename, // Ensure clean filename
-        file_url: fullDownloadUrl,
-        download_url: fullDownloadUrl,
+        file_url: downloadUrl,
+        download_url: downloadUrl,
         direct_download_url: downloadUrl,
         file_size: doc.file_size || 'N/A',
         uploaded_at: doc.uploaded_at || doc.upload_date || new Date().toISOString(),
